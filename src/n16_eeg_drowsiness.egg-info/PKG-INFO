@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: n16-eeg-drowsiness
+Version: 0.2.0
+Summary: Single-channel NeuroSky EEG drowsiness detection MVP for group N16
+Requires-Python: >=3.10
+Requires-Dist: numpy>=1.26
+Requires-Dist: pandas>=2.1
+Provides-Extra: hardware
+Requires-Dist: pyserial>=3.5; extra == "hardware"
+Provides-Extra: ml-extra
+Requires-Dist: scipy>=1.11; extra == "ml-extra"
+Requires-Dist: scikit-learn>=1.4; extra == "ml-extra"
+Requires-Dist: joblib>=1.3; extra == "ml-extra"
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: ruff>=0.5; extra == "dev"

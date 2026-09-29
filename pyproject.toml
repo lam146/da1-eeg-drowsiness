@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "n16-eeg-drowsiness"
+version = "0.2.0"
+description = "Single-channel NeuroSky EEG drowsiness detection MVP for group N16"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+]
+
+[project.optional-dependencies]
+hardware = ["pyserial>=3.5"]
+ml-extra = ["scipy>=1.11", "scikit-learn>=1.4", "joblib>=1.3"]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+n16-acquire = "n16_eeg.acquire:main"
+n16-live = "n16_eeg.live:main"
+n16-simulate = "n16_eeg.simulate:main"
+n16-demo = "n16_eeg.demo:main"
+n16-blink-eval = "n16_eeg.blink_eval:main"
+n16-gui = "n16_eeg.gui:main"
+n16-workflow = "n16_eeg.workflow:main"
+n16-featurize = "n16_eeg.featurize:main"
+n16-train = "n16_eeg.train:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

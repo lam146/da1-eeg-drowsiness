@@ -1,0 +1,10 @@
+[console_scripts]
+n16-acquire = n16_eeg.acquire:main
+n16-blink-eval = n16_eeg.blink_eval:main
+n16-demo = n16_eeg.demo:main
+n16-featurize = n16_eeg.featurize:main
+n16-gui = n16_eeg.gui:main
+n16-live = n16_eeg.live:main
+n16-simulate = n16_eeg.simulate:main
+n16-train = n16_eeg.train:main
+n16-workflow = n16_eeg.workflow:main

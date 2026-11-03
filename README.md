@@ -1,147 +1,110 @@
-# N16 – Phát hiện buồn ngủ khi lái xe từ EEG NeuroSky
+# N16 — Phát hiện buồn ngủ từ EEG đơn kênh NeuroSky
 
-## Tài liệu học ML
+Đồ án 1, học kỳ 1 năm học 2026–2027, nhóm N16. Kho mã phục vụ theo dõi tiến độ và kiểm tra các mô-đun phần mềm của hệ thống phát hiện buồn ngủ từ EEG đơn kênh.
 
-- [Học ML từ con số 0 cho người mới — PDF](docs/learning/Hoc_ML_Tu_Con_So_0_Cho_Nguoi_Moi.pdf): thuật ngữ, ví dụ đời thường và 12 bài tập có đáp án.
-- [Tự học ML cho đồ án EEG N16 — PDF](docs/learning/N16_TuHoc_ML_Cho_DoAn_EEG.pdf): đặc trưng EEG, KSS, LOSO, mô hình và cách đọc kết quả.
+Mục tiêu là kết hợp **đặc trưng phổ EEG và đặc trưng chớp mắt từ raw**, xây dựng mô hình phân loại tỉnh/buồn ngủ và triển khai cảnh báo âm thanh. Nhãn dữ liệu tự thu dựa trên KSS theo quy trình thí nghiệm. Thiết bị sử dụng là NeuroSky với raw danh định 512 Hz.
 
-Kho mã không kèm dữ liệu EEG cá nhân, file SEED-VIG, dữ liệu dẫn xuất, mô hình đã huấn luyện hoặc các bộ cài/tài liệu tham khảo tải về. Tải dữ liệu theo quyền sử dụng của nguồn và đặt tại `data/external/` trên máy. Các fixture trong kiểm thử là dữ liệu giả lập.
+## Phạm vi triển khai
 
-## Xử lý dữ liệu ngoại tuyến
+| Thành phần | Nội dung đã có trong mã nguồn | Phạm vi đã kiểm tra |
+|---|---|---|
+| Thu nhận | Parser ThinkGear, kiểm tra checksum, thu qua COM; nhập CSV OpenViBE | Kiểm thử parser; đã đọc các phiên pilot thu qua OpenViBE. Chưa coi đó là kiểm chứng parser riêng trên thiết bị |
+| Tiền xử lý | Nhánh FFT 0,5–45 Hz; công cụ lọc SOS ngoại tuyến và sàng lọc vùng lỗi | Kiểm thử tín hiệu giả lập và xử lý các bản ghi pilot; giữ nguyên raw gốc |
+| Đặc trưng | Công suất băng tần, tỷ số công suất, entropy; thuật toán nền ước lượng chớp mắt | Kiểm thử phần mềm; chưa xác nhận độ chính xác chớp mắt bằng nguồn đối chiếu độc lập |
+| Học máy | Logistic Regression, SVM và Random Forest trong Pipeline scikit-learn; chuẩn hóa trong mỗi fold | Đã kiểm thử quy trình huấn luyện, lưu mô hình và dự đoán ngoài fold bằng fixture giả lập |
+| Đánh giá | Leave-One-Group-Out với nhóm là người; confusion matrix, macro-F1, balanced accuracy và AUC khi xác định được | Chưa có kết quả phân loại thực nghiệm được xác nhận trên dữ liệu tự thu hoặc SEED-VIG |
+| Giao diện | Nạp raw, kiểm tra CSV, tạo đặc trưng theo khoảng nhãn, huấn luyện và nhập SEED-VIG | Giao diện Tkinter bốn tab đã qua kiểm tra khởi tạo |
+| Runtime C++17 | COM, ThinkGear, DSP, suy luận theo mô hình JSON và cảnh báo | Đã biên dịch và chạy self-test; chưa chứng minh tiêu chí độ trễ cảnh báo trên thiết bị |
 
-`scripts/filter_pilot_offline.py` tạo bản lọc riêng và đánh dấu vùng lỗi, không ghi đè raw. `scripts/process_s01_pilots.py` xử lý sáu phiên S01 theo các đường dẫn cục bộ được khai báo trong script; các file đo/phiếu không nằm trong kho Git. Đặc trưng ứng viên chưa có nhãn không được coi là tập huấn luyện hoàn chỉnh. Bộ lọc hai chiều ngoại tuyến khác với nhánh FFT trong ứng dụng và không phải bằng chứng về độ trễ cảnh báo live.
+## Kiến trúc phần mềm
 
-```powershell
-.\.venv\Scripts\python.exe scripts/filter_pilot_offline.py raw/ten_phien.csv output/ten_lan_xu_ly_moi
-```
+- **Python:** chuẩn bị dữ liệu, xử lý ngoại tuyến, huấn luyện và đánh giá. Nhánh scikit-learn lưu Pipeline dưới dạng `joblib`.
+- **C++17:** mô-đun thu nhận và suy luận trực tiếp; hiện dùng định dạng JSON từ nhánh logistic riêng.
+- **Giao diện ML:** hỗ trợ kiểm tra file và tổ chức các bước chuẩn bị dữ liệu; không tự tạo nhãn KSS từ tên file.
 
-Các bài kiểm tra phần mềm không thay thế thực nghiệm phân loại, đối chiếu chớp mắt hoặc đo độ trễ trên thiết bị.
+Hai nhánh mô hình cần được phân biệt: Pipeline scikit-learn **chưa tự xuất thành mô hình JSON của runtime C++**. Bộ lọc SOS hai chiều ngoại tuyến cũng khác nhánh FFT trong ứng dụng. Khi chuyển mô hình sang chạy trực tiếp, cần thống nhất bộ lọc, thứ tự đặc trưng, đơn vị, scaler và kiểm tra đầu ra giữa các bản triển khai.
 
-## Ứng dụng nạp CSV vào ML
+## Trạng thái dữ liệu và thực nghiệm
 
-Nhấp đúp **`Mo_UngDung_ML.cmd`** trong thư mục dự án để mở giao diện tiếng Việt.
-Ứng dụng cho phép xem CSV/đồ thị raw, tạo đặc trưng từ khoảng nhãn đã kiểm tra,
-và chọn Logistic Regression, SVM hoặc Random Forest để huấn luyện/đánh giá LOSO.
-Xem [hướng dẫn từng bước](docs/HUONG_DAN_UNG_DUNG_ML.md).
-File raw chưa có nhãn vẫn xem được; file thử chớp mắt không tự trở thành dữ liệu buồn ngủ.
-Tab **4. SEED-VIG** cho phép xem biến MAT và nhập theo manifest sau khi được cấp quyền.
-Đã kiểm tra dữ liệu MAT thật của 23 phiên ngày 28/10/2026; tab 4 hiển thị hồ sơ dữ liệu đã tải. Xem [dữ liệu thật và cấu hình cần hoàn thiện](docs/SEED_VIG_DU_LIEU_THAT_20261028.md). Chưa có kết quả huấn luyện trên dữ liệu này.
-Xem [cách áp dụng đầy đủ ba nguồn GVHD](docs/SEED_VIG_VA_BA_NGUON_GVHD.md).
+Cập nhật ngày **03/11/2026**, theo hồ sơ xử lý hiện có:
 
-## Cập nhật theo tài liệu GVHD 23/10/2026
+- Đã thu sáu phiên pilot của người S01. Sau sàng lọc kỹ thuật và tách vùng biên lọc, còn **1.291 cửa sổ ứng viên 4 giây**, tương đương **86 phút 4 giây**.
+- Số cửa sổ trên chưa phải số mẫu huấn luyện sạch có nhãn đã xác nhận. Còn căn mốc KSS, xem các vùng nghi nhiễu và thống nhất quy tắc khoảng nhãn; phiên 06 có chênh lệch thời lượng raw và nhật ký chưa giải thích được.
+- Đã kiểm tra file đặc trưng và nhãn PERCLOS của **23 phiên SEED-VIG** trên máy cục bộ. Chưa xác nhận đầy đủ ánh xạ người của bản phát hành và chưa chốt ngưỡng phân loại; chưa chạy đánh giá thực nghiệm trên bộ này.
+- Chưa có dữ liệu người thứ hai được xác nhận trong hồ sơ hiện tại. Sáu phiên S01 không thay thế sáu người và chưa đủ để làm LOSO theo người trên dữ liệu tự thu.
 
-Đã bổ sung nhập CSV OpenViBE, nhập đặc trưng MAT SEED-VIG theo manifest,
-và scikit-learn LOSO theo người (Logistic Regression, SVM, Random Forest).
-Hướng dẫn, lệnh chạy, quy tắc nhãn và giới hạn nằm tại
-[Áp dụng tài liệu GVHD](docs/AP_DUNG_TAI_LIEU_GVHD.md).
-SEED-VIG/PERCLOS được đánh giá riêng, không coi là raw NeuroSky/KSS;
-pipeline joblib mới chỉ dùng ngoại tuyến, không thay JSON runtime C++.
+### Nội dung cần hoàn thiện
 
-Mã nguồn MVP cho Đồ án 1 nhóm N16, HK1 2026–2027. Kiến trúc dùng Python cho huấn luyện/đánh giá ngoại tuyến và C++17 cho hệ thống chạy thời gian thực, phù hợp định hướng Kỹ thuật máy tính.
+1. Hoàn tất quy tắc nhãn và căn thời gian, tạo tập đặc trưng có nhãn từ dữ liệu đạt chất lượng.
+2. Bổ sung dữ liệu theo người và thực hiện đánh giá chéo theo người; báo cáo kết quả từng fold và các giới hạn.
+3. Đối chiếu từng sự kiện chớp mắt với nguồn tham chiếu độc lập để kiểm tra tiêu chí **≥90% so với đếm tay**.
+4. Đối chiếu mô hình Python–C++, kiểm tra suy luận trực tiếp và đo **độ trễ cảnh báo <3 giây** theo mốc đo đã thống nhất.
 
-## Chức năng đã có
+Các chỉ số từ dữ liệu giả lập chỉ xác nhận hoạt động phần mềm, không dùng làm accuracy/F1 của báo cáo thực nghiệm. Chưa đánh dấu các tiêu chí chớp mắt hoặc độ trễ là đã đạt.
 
-- Đọc gói ThinkGear qua Bluetooth COM, kiểm tra checksum và lưu raw EEG 512 Hz.
-- Tiền xử lý 0,5–45 Hz, loại nhiễu điện lưới 50 Hz bằng FFT.
-- Trích đặc trưng phổ delta/theta/alpha/beta/gamma, các tỷ số và spectral entropy.
-- Phát hiện chớp mắt/EOG, độ rộng chớp và chớp kéo dài.
-- Huấn luyện logistic regression không cần scikit-learn; lưu/đọc mô hình JSON.
-- Đánh giá Leave-One-Subject-Out, đặt scaler bên trong từng fold để tránh rò rỉ dữ liệu.
-- Phát lại gần thời gian thực, cảnh báo liên tiếp, ghi risk và độ trễ.
-- Chạy trực tiếp từ luồng NeuroSky khi có thiết bị và phát cảnh báo âm thanh.
-- Chấm precision/recall/F1 và sai số đếm chớp mắt so với nhãn tay.
-- Giao diện Tkinter hiển thị trạng thái, nguy cơ, theta/alpha, số chớp và đồ thị.
-- Workflow một lệnh để tạo dữ liệu mô phỏng, huấn luyện, đánh giá và kiểm tra demo.
-- Runtime C++17 độc lập thực hiện COM, ThinkGear, DSP, suy luận và cảnh báo.
+## Kiểm tra nhanh mã nguồn
 
-> Dữ liệu và chỉ số mô phỏng chỉ dùng kiểm thử phần mềm. Không dùng chúng làm kết quả accuracy/F1 của báo cáo thực nghiệm.
+### Yêu cầu môi trường
 
-## Chạy nhanh khi chưa có thiết bị
+Python 3.10 trở lên có Tkinter, PowerShell trên Windows; nếu biên dịch C++ bằng script thì cần `g++` hỗ trợ C++17. Các gói Python được khai báo trong `pyproject.toml`.
 
-Trong PowerShell tại thư mục dự án:
+Trong PowerShell tại thư mục kho mã:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\run_demo.ps1
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m n16_eeg.ml_gui --check
 ```
 
-Lệnh thứ hai tự tạo cohort giả lập, huấn luyện mô hình, kiểm tra toàn bộ pipeline rồi mở giao diện. Dùng `-NoGui` nếu chỉ muốn chạy kiểm tra dòng lệnh:
+Mở ứng dụng nạp dữ liệu:
+
+```powershell
+.\Mo_UngDung_ML.cmd
+```
+
+Kiểm tra toàn luồng bằng dữ liệu **giả lập**, không cần dữ liệu cá nhân hoặc SEED-VIG:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run_demo.ps1 -NoGui
 ```
 
-Build và chạy sản phẩm C++:
+Biên dịch và kiểm tra runtime C++:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_cpp.ps1
+```
+
+Script build gọi self-test sau khi biên dịch. Để chạy thêm phát lại C++ trên dữ liệu giả lập:
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run_cpp_demo.ps1
 ```
 
-## Chạy từng bước
+Lần kiểm tra ngày **03/11/2026**: **66 kiểm thử Python đạt**, `pip check` không phát hiện xung đột, giao diện bốn tab khởi tạo được, C++ biên dịch và self-test đạt. Đây là kết quả kiểm tra phần mềm, không phải kết quả đánh giá phát hiện buồn ngủ trên người.
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m n16_eeg.workflow --root .
-python -m n16_eeg.gui
-python -m pytest -q
-```
+## Cấu trúc kho mã
 
-Các tệp đầu ra chính:
+| Đường dẫn | Vai trò |
+|---|---|
+| `src/n16_eeg/thinkgear.py`, `acquire.py` | Giải mã và thu dữ liệu ThinkGear |
+| `src/n16_eeg/preprocess.py`, `signal_features.py`, `blink.py` | Xử lý tín hiệu và tính đặc trưng |
+| `src/n16_eeg/ml_gui.py`, `ml_workbench.py` | Giao diện và chuẩn bị dữ liệu có kiểm tra nguồn |
+| `src/n16_eeg/seed_vig.py`, `openvibe_import.py` | Bộ nhập theo định dạng nguồn |
+| `src/n16_eeg/sklearn_train.py` | Pipeline scikit-learn và đánh giá theo người |
+| `src/n16_eeg/model.py`, `train.py`, `workflow.py` | Nhánh logistic/JSON và quy trình demo |
+| `cpp/` | Runtime C++17 và cấu hình CMake |
+| `scripts/` | Cài đặt, build, demo và xử lý dữ liệu cục bộ |
+| `tests/` | Kiểm thử đơn vị và tích hợp với fixture giả lập |
+| `configs/seed_vig_manifest.example.json` | Cấu hình mẫu có placeholder; chưa phải cấu hình dữ liệu dùng ngay |
 
-- `output/model/n16_logistic_model.json`: mô hình đã lưu.
-- `output/model/loso_metrics.json`: đánh giá LOSO, có cảnh báo dữ liệu synthetic.
-- `output/demo/replay_model_log.csv`: nhật ký phát lại.
-- `output/demo/workflow_summary.json`: tóm tắt kiểm tra toàn luồng.
+Các script xử lý pilot tham chiếu file đo trên máy nghiên cứu; muốn chạy lại cần cung cấp dữ liệu và metadata tương ứng. Kho mã không chứa các file đó. Quy trình demo giả lập ở trên có thể dùng để kiểm tra phần mềm riêng.
 
-## Khi có thiết bị NeuroSky
+## Nguồn kỹ thuật
 
-Cài thêm driver đọc cổng nối tiếp:
+- [ThinkGear Communications Protocol](https://developer.neurosky.com/docs/doku.php?id=thinkgear_communications_protocol): định dạng raw và giải mã dữ liệu.
+- [SEED-VIG](https://bcmi.sjtu.edu.cn/home/seed/seed-vig.html): dữ liệu tham khảo mức tỉnh táo; xử lý riêng với nhãn KSS của NeuroSky.
+- [scikit-learn](https://scikit-learn.org/stable/): Pipeline, các mô hình nền và đánh giá theo nhóm.
 
-```powershell
-python -m pip install -e .[hardware]
-python -m n16_eeg.acquire --list-ports
-```
+## Phạm vi công khai
 
-Sau khi ghép đôi Bluetooth và biết cổng COM:
-
-```powershell
-python -m n16_eeg.acquire --port COM5 --subject S01 --session afternoon_01 `
-  --duration-min 30 --output data/raw/S01_afternoon_01.csv
-```
-
-Bổ sung nhãn KSS vào cột `kss`, sau đó:
-
-```powershell
-python -m n16_eeg.featurize data/raw/S01_afternoon_01.csv data/processed/S01_features.csv
-python -m n16_eeg.train data/processed/all_subjects_features.csv
-python -m n16_eeg.demo data/raw/S01_afternoon_01.csv `
-  --model output/model/n16_logistic_model.json --speed 1 --sound
-python -m n16_eeg.live --port COM5 --model output/model/n16_logistic_model.json
-```
-
-Khi dùng runtime C++ cho sản phẩm cuối:
-
-```powershell
-.\cpp\build\n16_runtime.exe live --port COM5 `
-  --model output\model\n16_logistic_model.json --duration-min 30
-```
-
-Chi tiết vận hành nằm trong `docs/HUONG_DAN_CHAY.md`; quy trình thu và an toàn nằm trong `docs/PROTOCOL_THU_DU_LIEU.md`.
-
-## Cấu trúc chính
-
-- `src/n16_eeg/acquire.py`: thu dữ liệu ThinkGear.
-- `src/n16_eeg/preprocess.py`: lọc tín hiệu.
-- `src/n16_eeg/blink.py`: phát hiện chớp mắt.
-- `src/n16_eeg/signal_features.py`: đặc trưng phổ.
-- `src/n16_eeg/model.py`: mô hình và LOSO.
-- `src/n16_eeg/workflow.py`: pipeline tự động.
-- `src/n16_eeg/gui.py`: giao diện demo.
-- `src/n16_eeg/live.py`: suy luận trực tiếp từ thiết bị.
-- `src/n16_eeg/blink_eval.py`: chấm phát hiện chớp mắt với nhãn tay.
-- `tests/test_core.py`: kiểm thử đơn vị và tích hợp.
-- `cpp/`: runtime C++17 cho triển khai thời gian thực.
-- `docs/KIEN_TRUC_PYTHON_CPP.md`: cách build và giải thích giao tiếp Python–C++.
-
-Không thử nghiệm khi đang lái xe thật. Chỉ dùng mô phỏng lái xe, có người giám sát và dừng ngay khi người tham gia khó chịu hoặc quá buồn ngủ.
+Kho GitHub công khai mã nguồn, cấu hình mẫu và README giới thiệu đồ án. **Không đăng dữ liệu SEED-VIG, raw EEG cá nhân, dữ liệu dẫn xuất, mô hình đã huấn luyện, báo cáo, tài liệu tự học hoặc bộ cài tải về.** Các tệp này được giữ trên máy và bỏ qua bằng `.gitignore`; dữ liệu ngoài được quản lý cục bộ tại `data/external/`.

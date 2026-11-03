@@ -20,6 +20,8 @@ NON_FEATURES = {
     "window_start_ms",
     "window_end_ms",
     "source_is_synthetic",
+    "perclos", "kss", "dataset_id", "signal_unit", "fs_hz", "sample_index",
+    "feature_row", "source_file", "received_timestamp_ms", "signal_time_ms",
 }
 
 
@@ -41,6 +43,10 @@ def train_from_frame(
     model_output: Path,
     metrics_output: Path,
 ) -> dict[str, object]:
+    if "dataset_id" in frame and set(frame["dataset_id"].astype(str)) != {"neurosky"}:
+        raise ValueError("External/OpenViBE features require separate sklearn offline evaluation")
+    if "signal_unit" in frame and set(frame["signal_unit"].astype(str)) != {"count"}:
+        raise ValueError("Legacy runtime export expects verified raw-count feature provenance")
     missing = {"subject_id", "label"} - set(frame.columns)
     if missing:
         raise ValueError(f"Missing columns: {sorted(missing)}")

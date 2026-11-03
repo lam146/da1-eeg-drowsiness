@@ -33,7 +33,17 @@ def featurize_session(
     if missing:
         raise ValueError(f"Missing columns: {sorted(missing)}")
 
-    ordered = frame.sort_values("timestamp_ms").reset_index(drop=True).copy()
+    if frame[["subject_id", "session_id"]].drop_duplicates().shape[0] != 1:
+        raise ValueError("Featurize one person/session at a time")
+    sort_column = "sample_index" if "sample_index" in frame else "timestamp_ms"
+    ordered = frame.sort_values(sort_column, kind="stable").reset_index(drop=True).copy()
+    if "sample_index" in ordered and not np.all(np.diff(ordered["sample_index"]) == 1):
+        raise ValueError("Non-contiguous sample_index; split continuous segments before featurizing")
+    for column in ("signal_unit", "dataset_id", "fs_hz"):
+        if column in ordered and (ordered[column].isna().any() or ordered[column].nunique() != 1):
+            raise ValueError(f"Mixed/missing {column} within a session")
+    if "fs_hz" in ordered and float(ordered["fs_hz"].iloc[0]) != fs:
+        raise ValueError("Input fs_hz does not match feature configuration")
     ordered["kss"] = pd.to_numeric(ordered["kss"], errors="coerce").ffill(limit=fs * 5 * 60)
     window = int(window_s * fs)
     step = int(step_s * fs)
@@ -61,6 +71,9 @@ def featurize_session(
                 "is_synthetic" in block and block["is_synthetic"].astype(bool).all()
             ),
         }
+        for column in ("signal_unit", "dataset_id", "fs_hz"):
+            if column in block:
+                record[column] = block[column].iloc[0]
         record.update(bandpower_features(samples, fs=float(fs)))
         record.update(blink_window_features(samples, fs=float(fs)))
         rows.append(record)

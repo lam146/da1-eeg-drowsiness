@@ -1,0 +1,16 @@
+{
+  "dataset": "seed-vig",
+  "source_is_synthetic": false,
+  "sessions": [
+    {
+      "subject_id": "REPLACE_WITH_VERIFIED_PERSON_ID",
+      "session_id": "REPLACE_WITH_VERIFIED_SESSION_ID",
+      "feature_file": "../data/external/seed-vig/REPLACE_FEATURE_FILE.mat",
+      "feature_key": "psd_movingAve",
+      "sample_axis": 1,
+      "label_file": "../data/external/seed-vig/REPLACE_LABEL_FILE.mat",
+      "label_key": "REPLACE_AFTER_INSPECT",
+      "alignment_verified": false
+    }
+  ]
+}

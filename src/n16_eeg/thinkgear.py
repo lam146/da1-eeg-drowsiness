@@ -27,6 +27,10 @@ class ThinkGearParser:
 
     def __init__(self) -> None:
         self._buffer = bytearray()
+        self.valid_packets = 0
+        self.checksum_errors = 0
+        self.length_errors = 0
+        self.payload_errors = 0
 
     def feed(self, chunk: bytes) -> list[ThinkGearPacket]:
         self._buffer.extend(chunk)
@@ -44,6 +48,7 @@ class ThinkGearParser:
 
             payload_len = self._buffer[2]
             if payload_len > MAX_PAYLOAD:
+                self.length_errors += 1
                 del self._buffer[0]
                 continue
             total_len = 2 + 1 + payload_len + 1
@@ -55,8 +60,14 @@ class ThinkGearParser:
             del self._buffer[:total_len]
             expected = (~(sum(payload) & 0xFF)) & 0xFF
             if checksum != expected:
+                self.checksum_errors += 1
                 continue
-            packets.append(self._parse_payload(payload))
+            decoded = self._parse_payload(payload)
+            if decoded is None:
+                self.payload_errors += 1
+                continue
+            self.valid_packets += 1
+            packets.append(decoded)
 
         return packets
 
@@ -67,24 +78,28 @@ class ThinkGearParser:
         return -1
 
     @staticmethod
-    def _parse_payload(payload: bytes) -> ThinkGearPacket:
+    def _parse_payload(payload: bytes) -> ThinkGearPacket | None:
         raw: list[int] = []
         poor_signal = attention = meditation = blink_strength = None
         index = 0
 
         while index < len(payload):
+            extended = False
             while index < len(payload) and payload[index] == 0x55:
+                extended = True
                 index += 1
             if index >= len(payload):
-                break
+                return None
 
             code = payload[index]
             index += 1
             if code < 0x80:
                 if index >= len(payload):
-                    break
+                    return None
                 value = payload[index]
                 index += 1
+                if extended:
+                    continue
                 if code == 0x02:
                     poor_signal = value
                 elif code == 0x04:
@@ -96,14 +111,16 @@ class ThinkGearParser:
                 continue
 
             if index >= len(payload):
-                break
+                return None
             length = payload[index]
             index += 1
             value = payload[index : index + length]
             index += length
             if len(value) != length:
-                break
-            if code == 0x80 and length == 2:
+                return None
+            if not extended and code == 0x80 and length != 2:
+                return None
+            if not extended and code == 0x80 and length == 2:
                 raw.append(int.from_bytes(value, byteorder="big", signed=True))
 
         return ThinkGearPacket(tuple(raw), poor_signal, attention, meditation, blink_strength)

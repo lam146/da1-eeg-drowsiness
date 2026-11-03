@@ -104,7 +104,3 @@ Các script xử lý pilot tham chiếu file đo trên máy nghiên cứu; muố
 - [ThinkGear Communications Protocol](https://developer.neurosky.com/docs/doku.php?id=thinkgear_communications_protocol): định dạng raw và giải mã dữ liệu.
 - [SEED-VIG](https://bcmi.sjtu.edu.cn/home/seed/seed-vig.html): dữ liệu tham khảo mức tỉnh táo; xử lý riêng với nhãn KSS của NeuroSky.
 - [scikit-learn](https://scikit-learn.org/stable/): Pipeline, các mô hình nền và đánh giá theo nhóm.
-
-## Phạm vi công khai
-
-Kho GitHub công khai mã nguồn, cấu hình mẫu và README giới thiệu đồ án. **Không đăng dữ liệu SEED-VIG, raw EEG cá nhân, dữ liệu dẫn xuất, mô hình đã huấn luyện, báo cáo, tài liệu tự học hoặc bộ cài tải về.** Các tệp này được giữ trên máy và bỏ qua bằng `.gitignore`; dữ liệu ngoài được quản lý cục bộ tại `data/external/`.

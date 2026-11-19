@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "n16-eeg-drowsiness"
 version = "0.3.0"
-description = "Hybrid Python training and C++ real-time EEG drowsiness MVP for group N16"
+description = "Single-channel NeuroSky EEG drowsiness prototype for group N16"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",

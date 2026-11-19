@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import math
 import time
 from collections import deque
 from pathlib import Path
@@ -12,28 +11,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .alarm import AlarmPolicy
 from .blink import blink_window_features
-from .model import LogisticModel
+from .model import LogisticModel, load_model, risk_score
+from .rbf_model import RbfModel
 from .signal_features import bandpower_features
-
-
-def _sigmoid(value: float) -> float:
-    value = float(np.clip(value, -30.0, 30.0))
-    return 1.0 / (1.0 + math.exp(-value))
-
-
-def risk_score(
-    spectral: dict[str, float],
-    blink: dict[str, float],
-    baseline_theta_alpha: float,
-) -> float:
-    """Return a 0-1 engineering-demo risk score, not a trained diagnosis."""
-
-    ratio = spectral["theta_alpha"] / max(baseline_theta_alpha, 1e-9)
-    spectral_shift = math.log(max(ratio, 1e-9))
-    long_blink = min(blink["long_blink_count"], 2.0)
-    wide_blink = max(0.0, blink["blink_width_mean"] - 0.20) / 0.20
-    return _sigmoid(2.2 * spectral_shift + 0.8 * long_blink + 0.5 * wide_blink - 0.35)
 
 
 def _beep(enabled: bool) -> None:
@@ -57,8 +39,9 @@ def replay(
     threshold: float = 0.85,
     consecutive: int = 2,
     sound: bool = False,
-    model: LogisticModel | None = None,
+    model: LogisticModel | RbfModel | None = None,
     verbose: bool = True,
+    release_consecutive: int = 1,
 ) -> pd.DataFrame:
     required = {"timestamp_ms", "raw_eeg", "poor_signal"}
     missing = required - set(frame.columns)
@@ -69,8 +52,10 @@ def replay(
 
     window = int(window_s * fs)
     step = int(step_s * fs)
+    if window < 8 or step < 1 or consecutive < 1:
+        raise ValueError("Invalid replay window, step, or confirmation count")
     baseline_ratios: deque[float] = deque(maxlen=10)
-    alert_streak = 0
+    policy = AlarmPolicy(threshold, consecutive, release_consecutive)
     rows: list[dict[str, object]] = []
     output_log.parent.mkdir(parents=True, exist_ok=True)
 
@@ -79,6 +64,9 @@ def replay(
         block = frame.iloc[start : start + window]
         poor = pd.to_numeric(block["poor_signal"], errors="coerce").fillna(255).to_numpy(float)
         if float(np.mean(poor > 50)) > 0.20:
+            policy.reset()
+            if speed > 0:
+                time.sleep(step_s / speed)
             continue
         samples = pd.to_numeric(block["raw_eeg"], errors="coerce").to_numpy(float)
         spectral = bandpower_features(samples, fs=float(fs))
@@ -92,9 +80,9 @@ def replay(
             if model is not None
             else risk_score(spectral, blink, baseline)
         )
-        alert_streak = alert_streak + 1 if risk >= threshold else 0
-        alarm = alert_streak >= consecutive
-        if alarm:
+        was_active = policy.active
+        alarm = policy.update(risk)
+        if alarm and not was_active:
             _beep(sound)
         latency_ms = (time.perf_counter_ns() - started_ns) / 1_000_000.0
         kss = block["kss"].iloc[-1] if "kss" in block else ""
@@ -131,13 +119,17 @@ def main() -> None:
     parser.add_argument("input", type=Path)
     parser.add_argument("--output-log", type=Path, default=Path("output/demo/replay_log.csv"))
     parser.add_argument("--speed", type=float, default=0.0, help="0=no wait, 1=real time, 10=10x")
+    parser.add_argument("--window-s", type=float, default=4.0, help="Use the window length from model training")
+    parser.add_argument("--step-s", type=float, default=1.0, help="Seconds between predictions")
+    parser.add_argument("--consecutive", type=int, default=2, help="Risk predictions required to alert")
+    parser.add_argument("--release-consecutive", type=int, default=1, help="Low-risk predictions required to clear the alert")
     parser.add_argument(
         "--threshold", type=float, help="Override saved model threshold (heuristic default: 0.85)"
     )
     parser.add_argument("--sound", action="store_true")
     parser.add_argument("--model", type=Path, help="Saved JSON logistic model")
     args = parser.parse_args()
-    model = LogisticModel.load(args.model) if args.model else None
+    model = load_model(args.model) if args.model else None
     threshold = (
         args.threshold
         if args.threshold is not None
@@ -146,6 +138,10 @@ def main() -> None:
     result = replay(
         pd.read_csv(args.input),
         output_log=args.output_log,
+        window_s=args.window_s,
+        step_s=args.step_s,
+        consecutive=args.consecutive,
+        release_consecutive=args.release_consecutive,
         speed=args.speed,
         threshold=threshold,
         sound=args.sound,

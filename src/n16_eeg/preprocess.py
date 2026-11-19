@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import numpy as np
+
+
+@lru_cache(maxsize=32)
+def _band_mask(size, fs, low_hz, high_hz, notch_hz, notch_width_hz):
+    frequencies = np.fft.rfftfreq(size, 1.0 / fs)
+    keep = (frequencies >= low_hz) & (frequencies <= high_hz)
+    if 0 < notch_hz < fs / 2:
+        keep &= np.abs(frequencies - notch_hz) > notch_width_hz / 2
+    return keep
 
 
 def preprocess_window(
@@ -29,9 +40,6 @@ def preprocess_window(
 
     centered = x - np.median(x)
     spectrum = np.fft.rfft(centered)
-    frequencies = np.fft.rfftfreq(centered.size, 1.0 / fs)
-    keep = (frequencies >= low_hz) & (frequencies <= high_hz)
-    if 0 < notch_hz < fs / 2:
-        keep &= np.abs(frequencies - notch_hz) > notch_width_hz / 2
+    keep = _band_mask(centered.size, fs, low_hz, high_hz, notch_hz, notch_width_hz)
     spectrum[~keep] = 0.0
     return np.fft.irfft(spectrum, n=centered.size)

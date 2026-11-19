@@ -20,6 +20,17 @@ def kss_to_label(kss: float) -> int | None:
     return None
 
 
+def raw_segment_ids(frame: pd.DataFrame) -> np.ndarray | None:
+    """Read optional native recorder segment IDs in sample order."""
+    if "raw_segment" not in frame:
+        return None
+    segments = pd.to_numeric(frame["raw_segment"], errors="coerce").to_numpy(float)
+    if (not np.isfinite(segments).all() or np.any(segments < 0)
+            or np.any(segments != np.floor(segments)) or np.any(np.diff(segments) < 0)):
+        raise ValueError("raw_segment must contain nondecreasing, nonnegative integer IDs")
+    return segments
+
+
 def featurize_session(
     frame: pd.DataFrame,
     fs: int = 512,
@@ -44,12 +55,17 @@ def featurize_session(
             raise ValueError(f"Mixed/missing {column} within a session")
     if "fs_hz" in ordered and float(ordered["fs_hz"].iloc[0]) != fs:
         raise ValueError("Input fs_hz does not match feature configuration")
-    ordered["kss"] = pd.to_numeric(ordered["kss"], errors="coerce").ffill(limit=fs * 5 * 60)
+    segments = raw_segment_ids(ordered)
+    kss = pd.to_numeric(ordered["kss"], errors="coerce")
+    ordered["kss"] = (kss.ffill(limit=fs * 5 * 60) if segments is None
+                      else kss.groupby(segments, sort=False).ffill(limit=fs * 5 * 60))
     window = int(window_s * fs)
     step = int(step_s * fs)
     rows: list[dict[str, object]] = []
 
     for start in range(0, len(ordered) - window + 1, step):
+        if segments is not None and segments[start] != segments[start + window - 1]:
+            continue
         block = ordered.iloc[start : start + window]
         poor = pd.to_numeric(block["poor_signal"], errors="coerce").fillna(255).to_numpy(float)
         if float(np.mean(poor > poor_signal_limit)) > bad_fraction_limit:

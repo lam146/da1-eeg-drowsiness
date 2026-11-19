@@ -1,0 +1,84 @@
+{
+  "exe": "N16_NhanBietBuonNgu_KSS_20261117.exe",
+  "sha256": "dbbab64e99f4a6f6a317012370e608828657428ac0c30c1267adb1359e1efbb5",
+  "size_bytes": 24846574,
+  "gui_startup": "passed",
+  "csv_replay_matches_python_model": true,
+  "replay": [
+    {
+      "file": "S03_10112026_1900_1905_Awake3.csv",
+      "decisions": 1082,
+      "windows": 1055,
+      "poor_windows": 27,
+      "alarm_windows": 263,
+      "episodes": 28,
+      "max_risk": 0.8013,
+      "samples": 139968,
+      "device_quality": false,
+      "artifact_windows": 27
+    },
+    {
+      "file": "S03_11112026_2214_2224_Awake3.csv",
+      "decisions": 2317,
+      "windows": 2181,
+      "poor_windows": 136,
+      "alarm_windows": 603,
+      "episodes": 52,
+      "max_risk": 0.7878,
+      "samples": 298016,
+      "device_quality": false,
+      "artifact_windows": 136
+    },
+    {
+      "file": "S04_11112026_2237_2248_Awake3.csv",
+      "decisions": 1723,
+      "windows": 1711,
+      "poor_windows": 12,
+      "alarm_windows": 122,
+      "episodes": 24,
+      "max_risk": 0.766,
+      "samples": 221952,
+      "device_quality": false,
+      "artifact_windows": 12
+    },
+    {
+      "file": "S05_13112026_2258_2308_drowsiness7.csv",
+      "decisions": 2296,
+      "windows": 2185,
+      "poor_windows": 111,
+      "alarm_windows": 1475,
+      "episodes": 45,
+      "max_risk": 0.7893,
+      "samples": 295328,
+      "device_quality": false,
+      "artifact_windows": 111
+    },
+    {
+      "file": "S05_14112026_1352_1404_drowsiness7.csv",
+      "decisions": 2608,
+      "windows": 2543,
+      "poor_windows": 65,
+      "alarm_windows": 2124,
+      "episodes": 42,
+      "max_risk": 0.7887,
+      "samples": 335264,
+      "device_quality": false,
+      "artifact_windows": 65
+    },
+    {
+      "file": "demo_session.csv",
+      "decisions": 85,
+      "windows": 85,
+      "poor_windows": 0,
+      "alarm_windows": 7,
+      "episodes": 2,
+      "max_risk": 0.6416,
+      "samples": 12288,
+      "device_quality": true,
+      "artifact_windows": 0,
+      "simulated_onset_to_alarm_ms": 4998.047,
+      "simulated_alarms_before_onset": 0
+    }
+  ],
+  "live_bluetooth_and_physical_audio_verified": false
+}

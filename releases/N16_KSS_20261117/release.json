@@ -1,0 +1,18 @@
+{
+  "runtime": "Python",
+  "window_s": 3,
+  "step_s": 0.25,
+  "consecutive": 2,
+  "release": "N16_OpenViBE_KSS_20261117",
+  "status": "EXPLORATORY_KSS_INTERVALS",
+  "variants": {
+    "LowRepeat": {
+      "file": "python_openvibe_rbf_3s.json",
+      "sha256": "b6e7cb37c78df2e899ed39d18c713098c0d40e53e2cec587ffd1299a98035a8a",
+      "threshold": 0.6,
+      "release_consecutive": 3,
+      "support_threshold": 0.575,
+      "support_consecutive": 6
+    }
+  }
+}

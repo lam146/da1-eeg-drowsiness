@@ -23,6 +23,13 @@ class MLApp:
         self.root = root
         self.frame = None
         self.raw_path = None
+        session_index = ROOT / "raw" / "note" / "ml_sessions.json"
+        self.recorded_sessions = {}
+        if session_index.is_file():
+            sessions = json.loads(session_index.read_text(encoding="utf-8"))
+            self.recorded_sessions = {
+                item["session_id"]: item for item in sessions if (ROOT / item["raw"]).is_file()
+            }
         self.feature_paths = []
         self.last_output = None
         self.busy = False
@@ -51,6 +58,15 @@ class MLApp:
         self.add_button(toolbar, "Chọn file CSV...", self.choose_raw).pack(side="left")
         self.path_var = tk.StringVar(value="Chưa chọn file")
         ttk.Label(toolbar, textvariable=self.path_var, wraplength=860).pack(side="left", padx=12)
+        if self.recorded_sessions:
+            sessions_bar = ttk.Frame(inspect_tab)
+            sessions_bar.pack(fill="x", pady=(8, 0))
+            ttk.Label(sessions_bar, text="Phiên có phiếu KSS").pack(side="left")
+            self.session_choice = ttk.Combobox(sessions_bar, state="readonly", width=38,
+                                               values=list(self.recorded_sessions))
+            self.session_choice.pack(side="left", padx=8)
+            self.session_choice.current(0)
+            self.add_button(sessions_bar, "Nạp phiên", self.load_recorded_session).pack(side="left")
         self.inspect_text = ScrolledText(inspect_tab, height=8, font=("Consolas", 10), wrap="word")
         self.inspect_text.pack(fill="x", pady=10)
         self.set_text(self.inspect_text, "Chọn CSV OpenViBE (Time:512Hz, Electrode), CSV raw N16 hoặc bảng đặc trưng.\n"
@@ -316,7 +332,13 @@ class MLApp:
         if name:
             self.load_path(Path(name))
 
+    def load_recorded_session(self):
+        session = self.recorded_sessions[self.session_choice.get()]
+        self.load_path(ROOT / session["raw"])
+
     def load_path(self, path):
+        session = next((item for item in self.recorded_sessions.values()
+                        if (ROOT / item["raw"]).resolve() == path.resolve()), None)
         def load():
             frame = work.read_csv_file(path)
             return frame, work.inspect_frame(frame)
@@ -332,9 +354,15 @@ class MLApp:
             if "duration_s" in details:
                 lines.extend([f"Thời lượng: {details['duration_s']:.3f} giây | Tần số: 512 Hz",
                               f"Biên độ raw: {details['minimum']:g} đến {details['maximum']:g} (chưa xác nhận đơn vị)"])
+            if details.get("raw_segment_boundaries", 0):
+                lines.append(f"Số lần gián đoạn đã ghi nhận: {details['raw_segment_boundaries']}. "
+                             "Đối chiếu mốc nhãn với trục mẫu trước khi tạo đặc trưng.")
             if "subjects" in details:
                 lines.append(f"Số người: {details['subjects']} | Số cửa sổ mỗi nhãn: {details['label_counts']}")
             lines.append(details["note"])
+            if session:
+                lines.extend([f"KSS theo khoảng ghi: {session['kss']}",
+                              f"Phiếu KSS: {session['note']}"])
             self.set_text(self.inspect_text, "\n".join(lines))
             self.preview.delete(*self.preview.get_children())
             columns = list(frame.columns[:12])
@@ -348,6 +376,16 @@ class MLApp:
                 variable.set(str(frame[name].iloc[0]) if name in frame and frame[name].nunique() == 1 else "")
             self.reviewed.set(False)
             self.annotations.set("")
+            if any(self.protocol.get() == item.get("protocol")
+                   for item in self.recorded_sessions.values()):
+                self.protocol.set("")
+            if session:
+                self.subject.set(session["subject_id"])
+                self.session.set(session["session_id"])
+                annotation = session.get("annotations")
+                if annotation and (ROOT / annotation).is_file():
+                    self.annotations.set(str(ROOT / annotation))
+                    self.protocol.set(session["protocol"])
             self.preparation_status.set("CSV đã nạp. Kiểm tra thông tin và file khoảng nhãn ở tab 2.")
             self.draw_plot()
         self.run_job("Đang đọc và kiểm tra CSV", load, loaded)
@@ -408,7 +446,9 @@ class MLApp:
             return directory, report
         def done(value):
             self.last_output, report = value
-            self.preparation_status.set(f"Đã tạo {report['counts']['kept']} cửa sổ. Lưu ở: {self.last_output}\n"
+            counts = report['counts']
+            self.preparation_status.set(f"Đã tạo {counts['kept']} cửa sổ. Bỏ {counts['raw_gap_rejected']} cửa sổ qua chỗ gián đoạn.\n"
+                                       f"Thư mục {self.last_output}\n"
                                        "Sang tab 3 chọn features.csv của nhiều người; không chọn CAL/chớp theo lệnh.")
             self.messages.showinfo("Đã tạo đặc trưng", str(self.last_output))
         self.run_job("Đang tạo đặc trưng theo khoảng nhãn", job, done)

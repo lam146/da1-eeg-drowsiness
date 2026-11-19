@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .blink import blink_window_features
-from .featurize import kss_to_label
+from .featurize import kss_to_label, raw_segment_ids
 from .signal_features import bandpower_features
 from .sklearn_train import FORBIDDEN_FEATURES, evaluate_frame, validate_frame
 
@@ -87,10 +87,13 @@ def inspect_frame(frame: pd.DataFrame) -> dict:
               "missing_cells": int(frame.isna().sum().sum())}
     if kind in {"openvibe_raw", "canonical_raw"}:
         time, signal, dataset = raw_arrays(frame)
+        segments = raw_segment_ids(frame)
         result.update(dataset=dataset, nominal_fs_hz=512,
                       duration_s=float(time[-1] + 1 / 512),
                       minimum=float(signal.min()), maximum=float(signal.max()),
                       note="Đủ cấu trúc để kiểm tra; chưa xác nhận tín hiệu sạch hoặc nhãn.")
+        if segments is not None:
+            result["raw_segment_boundaries"] = int(np.count_nonzero(np.diff(segments)))
     elif kind == "features":
         result.update(subjects=int(frame["subject_id"].nunique()),
                       label_counts={str(k): int(v) for k, v in frame["label"].value_counts(dropna=False).items()},
@@ -145,6 +148,13 @@ def prepare_features(frame: pd.DataFrame, intervals: pd.DataFrame, subject: str,
     time, signal, dataset = raw_arrays(frame)
     duration = float(time[-1] + 1 / 512)
     intervals = validate_intervals(intervals, duration)
+    usable = intervals.loc[intervals["quality_status"].eq("usable")]
+    interval_starts = usable["start_s"].to_numpy(float)
+    interval_ends = usable["end_s"].to_numpy(float)
+    interval_kss = usable["kss"].to_numpy(float)
+    starts = np.arange(0, len(signal) - n + 1, hop)
+    interval_indices = np.searchsorted(interval_starts, time[starts] + 1e-9, side="right") - 1
+    segments = raw_segment_ids(frame)
     poor = (pd.to_numeric(frame["poor_signal"], errors="coerce").to_numpy(float)
             if "poor_signal" in frame else np.full(len(frame), np.nan))
     synthetic = False
@@ -156,22 +166,22 @@ def prepare_features(frame: pd.DataFrame, intervals: pd.DataFrame, subject: str,
             synthetic |= bool(flags.isin(["true", "1"]).any())
     records = []
     counts = dict(candidate_windows=0, kept=0, no_usable_interval=0, kss_transition=0,
-                  device_quality_rejected=0)
-    for start in range(0, len(signal) - n + 1, hop):
+                  device_quality_rejected=0, raw_gap_rejected=0)
+    for start, interval_index in zip(starts, interval_indices):
         counts["candidate_windows"] += 1
+        if segments is not None and segments[start] != segments[start + n - 1]:
+            counts["raw_gap_rejected"] += 1
+            continue
         left, right = float(time[start]), float(time[start + n - 1] + 1 / 512)
-        fits = intervals[(intervals["start_s"] <= left + 1e-9)
-                         & (intervals["end_s"] >= right - 1e-9)
-                         & (intervals["quality_status"] == "usable")]
-        if fits.empty:
+        if interval_index < 0 or interval_ends[interval_index] < right - 1e-9:
             counts["no_usable_interval"] += 1
             continue
-        label = kss_to_label(float(fits.iloc[0]["kss"]))
+        label = kss_to_label(interval_kss[interval_index])
         if label is None:
             counts["kss_transition"] += 1
             continue
         device_values = poor[start:start + n]
-        if np.any(np.isfinite(device_values)):
+        if segments is not None or np.any(np.isfinite(device_values)):
             if (not np.isfinite(device_values).all() or np.any((device_values < 0) | (device_values > 255))
                     or np.mean(device_values > 50) > .2):
                 counts["device_quality_rejected"] += 1

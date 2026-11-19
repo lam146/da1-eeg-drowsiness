@@ -3,10 +3,27 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+
+from .rbf_model import RbfModel
+
+
+def risk_score(
+    spectral: dict[str, float],
+    blink: dict[str, float],
+    baseline_theta_alpha: float,
+) -> float:
+    """Return the heuristic score used when a trained model is unavailable."""
+    ratio = spectral["theta_alpha"] / max(baseline_theta_alpha, 1e-9)
+    spectral_shift = math.log(max(ratio, 1e-9))
+    long_blink = min(blink["long_blink_count"], 2.0)
+    wide_blink = max(0.0, blink["blink_width_mean"] - 0.20) / 0.20
+    logit = 2.2 * spectral_shift + 0.8 * long_blink + 0.5 * wide_blink - 0.35
+    return 1.0 / (1.0 + math.exp(-float(np.clip(logit, -30.0, 30.0))))
 
 
 @dataclass(frozen=True)
@@ -60,11 +77,24 @@ class LogisticModel:
     @classmethod
     def load(cls, path: Path) -> "LogisticModel":
         payload = json.loads(path.read_text(encoding="utf-8"))
+        return cls.from_payload(payload)
+
+    @classmethod
+    def from_payload(cls, payload: dict) -> "LogisticModel":
         if payload.get("model_type") != "numpy_logistic_regression":
             raise ValueError("Unsupported model type")
         if payload.get("format_version") != 1:
             raise ValueError("Unsupported model format version")
         return cls(**payload)
+
+
+def load_model(path: Path) -> LogisticModel | RbfModel:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("model_type") == "numpy_rbf_svm":
+        if payload.get("format_version") != 1:
+            raise ValueError("Unsupported RBF model format version")
+        return RbfModel(**payload)
+    return LogisticModel.from_payload(payload)
 
 
 def _sigmoid(z: np.ndarray) -> np.ndarray:

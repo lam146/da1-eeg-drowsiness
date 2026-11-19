@@ -57,6 +57,17 @@ def test_prepare_only_full_windows_inside_reviewed_intervals():
     assert "no forward-fill" in report["label_policy"]
 
 
+def test_native_gap_rejects_windows_that_cross_segments():
+    raw = raw_session().rename(columns={"Time:512Hz": "signal_time_ms", "Electrode": "raw_eeg"})
+    raw["signal_time_ms"] *= 1000
+    raw["poor_signal"] = 0
+    raw["raw_segment"] = (raw["signal_time_ms"] >= 6000).astype(int)
+    assert work.inspect_frame(raw)["raw_segment_boundaries"] == 1
+    result, report = work.prepare_features(raw, intervals(), "S01", "P01", "count", True, "review_v1")
+    assert report["counts"]["raw_gap_rejected"] == 3
+    assert result["window_start_ms"].tolist() == [0, 1000, 2000, 8000, 9000, 10000, 11000, 12000]
+
+
 @pytest.mark.parametrize("problem", ["review", "protocol", "unit", "person", "time_gap", "nan", "overlap", "fractional_kss"])
 def test_invalid_raw_or_labels_rejected(problem):
     raw, ann = raw_session(), intervals()

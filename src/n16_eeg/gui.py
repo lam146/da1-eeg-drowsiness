@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from .demo import replay
-from .model import LogisticModel
+from .model import load_model
 
 
 class Dashboard:
@@ -86,7 +86,7 @@ class Dashboard:
         try:
             frame = pd.read_csv(self.path_var.get())
             model = (
-                LogisticModel.load(self.model_path)
+                load_model(self.model_path)
                 if self.model_path and self.model_path.exists()
                 else None
             )
@@ -174,7 +174,7 @@ def main() -> None:
             raise SystemExit(f"Missing session: {args.session}")
         pd.read_csv(args.session, nrows=5)
         if args.model.exists():
-            LogisticModel.load(args.model)
+            load_model(args.model)
         print("GUI input check passed")
         return
     import tkinter as tk

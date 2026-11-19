@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import numpy as np
 
 from .preprocess import preprocess_window
@@ -16,6 +18,13 @@ BANDS = {
 }
 
 
+@lru_cache(maxsize=32)
+def _periodogram_grid(size, fs):
+    window = np.hanning(size)
+    scale = fs * np.sum(window**2)
+    return window, scale, np.fft.rfftfreq(size, 1.0 / fs)
+
+
 def _periodogram(x: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
     """Return a Hann-windowed one-sided periodogram without scipy."""
 
@@ -23,13 +32,12 @@ def _periodogram(x: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
     if x.ndim != 1 or x.size < 8:
         raise ValueError("A 1-D window with at least 8 samples is required")
     x = x - np.median(x)
-    window = np.hanning(x.size)
-    scale = fs * np.sum(window**2)
+    window, scale, frequencies = _periodogram_grid(x.size, fs)
     spectrum = np.fft.rfft(x * window)
     psd = (np.abs(spectrum) ** 2) / max(scale, np.finfo(float).eps)
     if psd.size > 2:
         psd[1:-1] *= 2.0
-    return np.fft.rfftfreq(x.size, 1.0 / fs), psd
+    return frequencies, psd
 
 
 def bandpower_features(samples: np.ndarray, fs: float = 512.0) -> dict[str, float]:

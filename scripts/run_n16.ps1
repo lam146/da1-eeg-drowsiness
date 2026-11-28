@@ -1,6 +1,6 @@
 param(
     [ValidateSet('Main', 'Spectral', 'LowRepeat')]
-    [string]$Variant = 'Main',
+    [string]$Variant = 'LowRepeat',
     [string]$ReleaseDirectory,
     [ValidatePattern('^COM\d+$')]
     [string]$Port,
@@ -18,7 +18,10 @@ if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
     throw 'Python environment missing. Run scripts/setup.ps1 first.'
 }
 if (-not $ReleaseDirectory) {
-    $ReleaseDirectory = Join-Path $Root 'output\N16_Chot_20261110'
+    $ReleaseDirectory = Join-Path $Root 'output\N16_Reviewed_20261127\release'
+    if (-not (Test-Path -LiteralPath (Join-Path $ReleaseDirectory 'release.json'))) {
+        $ReleaseDirectory = Join-Path $Root 'output\N16_Chot_20261110'
+    }
 }
 $ManifestPath = Join-Path $ReleaseDirectory 'release.json'
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
@@ -26,6 +29,7 @@ if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
 }
 $Manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $Profile = $Manifest.variants.PSObject.Properties[$Variant].Value
+if (-not $Profile) { throw "Variant $Variant missing from $ReleaseDirectory. Select an available variant using -Variant." }
 
 function Get-VerifiedArtifact($Artifact) {
     $Path = Join-Path $ReleaseDirectory $Artifact.file
@@ -42,6 +46,11 @@ $Log = Join-Path $OutputDirectory "${Timestamp}_${Variant}.csv"
 $Policy = @('--model', $Model, '--window-s', $Manifest.window_s,
     '--step-s', $Manifest.step_s, '--consecutive', $Manifest.consecutive,
     '--release-consecutive', $Profile.release_consecutive)
+if ($null -ne $Profile.support_threshold) {
+    $Policy += @('--support-threshold', $Profile.support_threshold,
+        '--support-consecutive', $Profile.support_consecutive)
+}
+if ($Profile.screen_raw) { $Policy += '--screen-raw' }
 
 Write-Host "N16 $Variant | threshold=$($Profile.threshold) | log=$Log"
 if ($Port) {

@@ -64,6 +64,36 @@ def pilot_features(raw_dir, pilot_dir):
         yield make_features(subject, session, starts, rows.label, raw, "nominal_kss"), digest
 
 
+def recording_labels(raw_dir, item, path, digest, raw_length, starts, stops):
+    labels = np.full(len(starts), -1, dtype=int)
+    if "note" in item:
+        parent = Path(item["note"]).parent.name.upper()
+        if parent.startswith("S") and parent[1:].isdigit() and parent != path.parent.name.upper():
+            raise ValueError(f"KSS note belongs to {parent}, recording is in {path.parent.name}: {path}")
+    if "annotations" in item:
+        annotation = raw_dir.parents[1] / item["annotations"]
+        if digest != item["recording_sha256"] or sha256(annotation) != item["annotations_sha256"]:
+            raise ValueError(f"Recording or KSS intervals changed: {path}")
+        spans = validate_intervals(read_csv_file(annotation), raw_length / FS)
+        for span in spans.loc[spans.quality_status.eq("usable")].itertuples(index=False):
+            label = binary(span.kss)
+            covered = (starts >= span.start_s * FS - 1e-6) & (stops <= span.end_s * FS + 1e-6)
+            if label is not None:
+                labels[covered] = label
+        return labels, "confirmed_kss_interval"
+    if "note" in item:
+        if digest != item["recording_sha256"]:
+            raise ValueError(f"Recording associated with the KSS note changed: {path}")
+        _, points = note_data(raw_dir.parent / item["note"])
+        for span in intervals(points, raw_length / FS):
+            covered = (starts >= span["start_s"] * FS) & (stops <= span["end_s"] * FS)
+            labels[covered] = span["label"]
+        return labels, "nominal_kss"
+    if item.get("session_label") not in (0, 1):
+        raise ValueError(f"Missing binary session label or KSS intervals for {path}")
+    return np.full(len(starts), item["session_label"], dtype=int), "provisional_session_label"
+
+
 def additional_features(raw_dir, manifest, prior_hashes):
     for item in manifest:
         path = raw_dir / item["file"]
@@ -77,34 +107,7 @@ def additional_features(raw_dir, manifest, prior_hashes):
         starts = stops - WINDOW
         artifacts = raw_artifacts(raw, np.zeros(len(raw), dtype=int), FS)
         clean = artifacts[starts] == artifacts[stops]
-        if "annotations" in item:
-            annotation = raw_dir.parents[1] / item["annotations"]
-            if digest != item["recording_sha256"] or sha256(annotation) != item["annotations_sha256"]:
-                raise ValueError(f"Recording or KSS intervals changed: {path}")
-            spans = validate_intervals(read_csv_file(annotation), len(raw) / FS)
-            labels = np.full(len(starts), -1, dtype=int)
-            for span in spans.loc[spans.quality_status.eq("usable")].itertuples(index=False):
-                label = binary(span.kss)
-                covered = (starts >= span.start_s * FS - 1e-6) & (stops <= span.end_s * FS + 1e-6)
-                if label is not None:
-                    labels[covered] = label
-            basis = "confirmed_kss_interval"
-        elif "note" in item:
-            if digest != item["recording_sha256"]:
-                raise ValueError(f"Recording associated with the KSS note changed: {path}")
-            note = raw_dir.parent / item["note"]
-            _, points = note_data(note)
-            spans = intervals(points, len(raw) / FS)
-            labels = np.full(len(starts), -1, dtype=int)
-            for span in spans:
-                covered = (starts >= span["start_s"] * FS) & (stops <= span["end_s"] * FS)
-                labels[covered] = span["label"]
-            basis = "nominal_kss"
-        else:
-            if item["session_label"] not in (0, 1):
-                raise ValueError(f"Expected binary session label in {path}")
-            labels = np.full(len(starts), item["session_label"], dtype=int)
-            basis = "provisional_session_label"
+        labels, basis = recording_labels(raw_dir, item, path, digest, len(raw), starts, stops)
         kept = clean & (labels >= 0)
         if not kept.any():
             raise ValueError(f"No usable labeled windows in {path}")

@@ -7,7 +7,9 @@ import csv
 import time
 from collections import deque
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
+from math import isfinite
 from threading import Event, Thread
 
 import numpy as np
@@ -17,6 +19,8 @@ from .blink import blink_window_features
 from .continuity import SERIAL_POLL_S, RawStreamWatchdog
 from .model import LogisticModel, load_model, risk_score
 from .rbf_model import RbfModel
+from .quality import RawArtifactGuard
+from .session_recording import SessionRecording
 from .signal_features import bandpower_features
 from .thinkgear import ThinkGearParser
 
@@ -35,10 +39,14 @@ class LiveDetector:
         release_consecutive: int = 1,
         support_threshold: float | None = None,
         support_consecutive: int = 1,
+        screen_raw: bool = False,
     ) -> None:
         if fs <= 90 or window_s * fs < 8 or step_s * fs < 1 or consecutive < 1:
             raise ValueError("Invalid live detector parameters")
         self.model = model
+        self.spectral_estimator = getattr(model, "spectral_estimator", "periodogram")
+        if self.spectral_estimator != "periodogram" and (fs != 512 or window_s != 3):
+            raise ValueError("The N16 Welch model requires a 3-second window at 512 Hz")
         self.fs = fs
         self.window_samples = int(window_s * fs)
         self.step_samples = int(step_s * fs)
@@ -50,6 +58,8 @@ class LiveDetector:
         self.signal_quality: deque[float] = deque(maxlen=self.window_samples)
         self.baseline_ratios: deque[float] = deque(maxlen=10)
         self.samples_since_decision = 0
+        self.screen_raw = screen_raw
+        self.raw_guard = RawArtifactGuard(self.window_samples, fs, screen_raw)
 
     def reset(self) -> None:
         self.samples.clear()
@@ -57,8 +67,14 @@ class LiveDetector:
         self.baseline_ratios.clear()
         self.samples_since_decision = 0
         self.policy.reset()
+        self.raw_guard.reset()
 
     def add_sample(self, sample: float, poor_signal: float, *, raw_artifact: bool = False) -> dict[str, object] | None:
+        sample = float(sample)
+        poor_signal = float(poor_signal)
+        if not isfinite(poor_signal) or not 0 <= poor_signal <= 255:
+            poor_signal = 255
+        raw_artifact = self.raw_guard.update(sample) or raw_artifact
         self.samples.append(float(sample))
         self.signal_quality.append(float(poor_signal))
         self.samples_since_decision += 1
@@ -70,7 +86,7 @@ class LiveDetector:
 
         started_ns = time.perf_counter_ns()
         poor_fraction = float(np.mean(np.asarray(self.signal_quality, dtype=float) > 50))
-        if raw_artifact or poor_fraction > 0.20:
+        if raw_artifact or poor_signal > 50 or poor_fraction > 0.20:
             self.policy.reset()
             return {
                 "timestamp_ms": int(time.time_ns() // 1_000_000),
@@ -78,11 +94,12 @@ class LiveDetector:
                 "risk": "",
                 "alarm": 0,
                 "poor_signal_fraction": round(poor_fraction, 4),
+                "raw_artifact": int(raw_artifact),
                 "latency_ms": round((time.perf_counter_ns() - started_ns) / 1_000_000, 3),
             }
 
         values = np.asarray(self.samples, dtype=float)
-        spectral = bandpower_features(values, fs=float(self.fs))
+        spectral = bandpower_features(values, fs=float(self.fs), estimator=self.spectral_estimator)
         blink = blink_window_features(values, fs=float(self.fs))
         if self.model is not None:
             risk = self.model.predict_feature_dict({**spectral, **blink})
@@ -98,6 +115,7 @@ class LiveDetector:
             "risk": round(float(risk), 4),
             "alarm": int(alarm),
             "poor_signal_fraction": round(poor_fraction, 4),
+            "raw_artifact": 0,
             "theta_alpha": round(float(spectral["theta_alpha"]), 4),
             "blink_count": int(blink["blink_count"]),
             "long_blink_count": int(blink["long_blink_count"]),
@@ -121,9 +139,15 @@ def run_live(
     *,
     baud: int = 57600,
     duration_min: float | None = None,
-    sound: bool = True,
+    sound: bool | Event = True,
     stop: Event | None = None,
     on_decision: Callable[[dict[str, object]], None] | None = None,
+    raw_output: Path | None = None,
+    subject_id: str = 'UNASSIGNED',
+    session_id: str = 'LIVE',
+    observations=None,
+    on_status: Callable[[dict[str, object]], None] | None = None,
+    on_observation: Callable[[dict[str, object]], None] | None = None,
 ) -> None:
     """Read a serial connection and stream logged decisions to the caller."""
     try:
@@ -132,13 +156,16 @@ def run_live(
         raise RuntimeError("Install hardware extra first: python -m pip install -e .[hardware]") from exc
 
     packet_parser = ThinkGearParser()
+    detector.raw_guard.screen_raw = detector.screen_raw
+    detector.reset()
     poor_signal = 255
     log_output.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "timestamp_ms", "state", "risk", "alarm", "poor_signal_fraction",
-        "theta_alpha", "blink_count", "long_blink_count", "latency_ms", "audio_requested_ms",
+        "theta_alpha", "blink_count", "long_blink_count", "latency_ms", "audio_requested_ms", "raw_artifact",
+        "sample_index", "raw_segment", "episode_id",
     ]
-    with serial.Serial(port, baud, timeout=SERIAL_POLL_S) as stream, log_output.open(
+    with ExitStack() as resources, serial.Serial(port, baud, timeout=SERIAL_POLL_S) as stream, log_output.open(
         "w", newline="", encoding="utf-8"
     ) as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
@@ -152,9 +179,40 @@ def run_live(
                 on_decision(decision)
 
         alarming = False
+        episodes = 0
         started = time.monotonic()
         watchdog = RawStreamWatchdog(started)
+        quality_received = None
+        raw_count, segment = 0, 0
+        last_status = started
+        recording = None
+        if raw_output is not None:
+            recording = resources.enter_context(SessionRecording(raw_output, subject_id, session_id,
+                detector.fs, observations, dict(model_type=detector.model.model_type if detector.model else 'heuristic',
+                    model_sha256=getattr(detector, 'model_sha256', None), threshold=detector.threshold,
+                    window_samples=detector.window_samples, step_samples=detector.step_samples,
+                    spectral_estimator=detector.spectral_estimator,
+                    consecutive=detector.policy.consecutive, release_consecutive=detector.policy.release_consecutive,
+                    support_threshold=detector.policy.support_threshold,
+                    support_consecutive=detector.policy.support_consecutive, fs_hz=detector.fs,
+                    feature_names=detector.model.feature_names if detector.model else [],
+                    screen_raw=detector.screen_raw, quality_expiry_s=3.), on_observation))
+
+        def publish_status(received):
+            nonlocal last_status
+            if received - last_status < .25:
+                return
+            last_status = received
+            if recording:
+                recording.flush()
+            quality = poor_signal if quality_received is not None and received - quality_received <= 3. else 255
+            if on_status:
+                on_status(dict(elapsed_s=received - started, samples=raw_count, poor_signal=quality,
+                               trace=list(detector.samples), segment=segment))
+
         while stop is None or not stop.is_set():
+            if recording:
+                recording.collect_observations()
             if duration_min is not None and time.monotonic() - started >= duration_min * 60:
                 break
             serial_error = None
@@ -171,25 +229,39 @@ def run_live(
                 detector.reset()
                 alarming = False
                 poor_signal = 255
+                quality_received = None
+                segment += 1
                 publish({"timestamp_ms": time.time_ns() // 1_000_000,
-                         "state": "MAT_TIN_HIEU", "alarm": 0})
+                         "state": "MAT_TIN_HIEU", "alarm": 0, "raw_segment": segment})
             if serial_error is not None:
                 raise OSError(f"Serial read failed on {port}: {serial_error}") from serial_error
             if watchdog.stalled:
+                publish_status(received)
                 continue
             for packet in packets:
                 if packet.poor_signal is not None:
                     poor_signal = packet.poor_signal
+                    quality_received = received
                 for sample in packet.raw_eeg:
-                    decision = detector.add_sample(sample, poor_signal)
+                    quality = poor_signal if quality_received is not None and received - quality_received <= 3. else 255
+                    if recording:
+                        recording.write(sample, quality, time.time_ns() // 1_000_000, segment)
+                    raw_count += 1
+                    decision = detector.add_sample(sample, quality)
                     if decision is None:
                         continue
                     alarm = bool(decision["alarm"])
-                    if alarm and not alarming and sound:
+                    if alarm and not alarming:
+                        episodes += 1
+                    decision.update(sample_index=raw_count - 1, raw_segment=segment,
+                                    episode_id=episodes if alarm else None)
+                    sound_enabled = sound.is_set() if isinstance(sound, Event) else sound
+                    if alarm and not alarming and sound_enabled:
                         decision["audio_requested_ms"] = time.time_ns() // 1_000_000
                         Thread(target=_beep, daemon=True).start()
                     alarming = alarm
                     publish(decision)
+            publish_status(received)
 
 
 def _print_decision(decision):
@@ -210,6 +282,9 @@ def main() -> None:
     parser.add_argument("--step-s", type=float, default=1.0, help="Seconds between predictions")
     parser.add_argument("--consecutive", type=int, default=2, help="Risk predictions required to alert")
     parser.add_argument("--release-consecutive", type=int, default=1, help="Low-risk predictions required to clear the alert")
+    parser.add_argument("--support-threshold", type=float)
+    parser.add_argument("--support-consecutive", type=int, default=1)
+    parser.add_argument("--screen-raw", action="store_true")
     parser.add_argument("--duration-min", type=float, default=30.0)
     parser.add_argument("--log-output", type=Path, default=Path("output/live/live_log.csv"))
     parser.add_argument("--no-sound", action="store_true")
@@ -219,7 +294,10 @@ def main() -> None:
     model = load_model(args.model)
     detector = LiveDetector(model, window_s=args.window_s, step_s=args.step_s,
                             threshold=args.threshold, consecutive=args.consecutive,
-                            release_consecutive=args.release_consecutive)
+                            release_consecutive=args.release_consecutive,
+                            support_threshold=args.support_threshold,
+                            support_consecutive=args.support_consecutive,
+                            screen_raw=args.screen_raw)
     try:
         run_live(args.port, detector, args.log_output, baud=args.baud, duration_min=args.duration_min,
                  sound=not args.no_sound, on_decision=_print_decision)

@@ -1,0 +1,63 @@
+{
+  "feature_names": [
+    "rel_delta",
+    "rel_theta",
+    "rel_alpha",
+    "rel_beta",
+    "rel_gamma",
+    "theta_alpha",
+    "theta_beta",
+    "alpha_beta",
+    "spectral_entropy",
+    "blink_rate_per_min",
+    "blink_width_mean",
+    "long_blink_count"
+  ],
+  "mean": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "scale": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "weights": [
+    0.16201372666961175,
+    -2.7352379603327095,
+    -12.836396080176245,
+    -0.37106962199981763,
+    5.175118408365898,
+    0.009224427171638119,
+    -0.014191291680798964,
+    1.6903690151586632,
+    1.0057437593953236,
+    0.016782314810717364,
+    -2.791519014468142,
+    0.0
+  ],
+  "bias": -0.6704469351053846,
+  "threshold": 0.545,
+  "model_type": "numpy_logistic_regression",
+  "format_version": 2,
+  "spectral_estimator": "welch_blend"
+}

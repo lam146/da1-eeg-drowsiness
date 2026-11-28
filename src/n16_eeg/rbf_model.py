@@ -28,7 +28,8 @@ class RbfModel:
         self._vectors = np.asarray(self.support_vectors, dtype=float)
         self._coefficients = np.asarray(self.dual_coefficients, dtype=float)
         width = len(self.feature_names)
-        if (self._center.shape != (width,) or self._scale.shape != (width,)
+        if (not width or len(set(self.feature_names)) != width
+                or self._center.shape != (width,) or self._scale.shape != (width,)
                 or self._coefficients.ndim != 1
                 or self._vectors.shape != (len(self._coefficients), width)
                 or not all(np.isfinite(array).all() for array in
@@ -38,6 +39,10 @@ class RbfModel:
             raise ValueError("Invalid RBF model parameters")
 
     def predict_margin(self, features: np.ndarray) -> float:
+        features = np.asarray(features, dtype=float)
+        if (features.shape != self._center.shape or not np.isfinite(features).all()
+                or np.any(features < 0)):
+            raise ValueError("Expected one finite nonnegative feature vector matching the RBF model")
         scaled = (np.log1p(features) - self._center) / self._scale
         differences = self._vectors - scaled
         squared_distance = np.einsum("ij,ij->i", differences, differences)
@@ -45,6 +50,9 @@ class RbfModel:
         return float(np.dot(kernels, self._coefficients) + self.intercept)
 
     def predict_feature_dict(self, features: dict[str, float]) -> float:
+        missing = [name for name in self.feature_names if name not in features]
+        if missing:
+            raise ValueError(f"Missing RBF model features: {missing}")
         row = np.array([features[name] for name in self.feature_names], dtype=float)
         margin = self.predict_margin(row)
         return float(1.0 / (1.0 + np.exp(-np.clip(margin, -30.0, 30.0))))

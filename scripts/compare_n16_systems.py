@@ -10,6 +10,7 @@ import pandas as pd
 from compare_pilot_ml_models import FEATURES, KEY, fit_model
 from evaluate_python_alert_latency import FS, feature_vector, prepare
 from n16_eeg.alarm import AlarmPolicy
+from n16_eeg.alarm_eval import alarm_onset_metrics
 from n16_eeg.model import LogisticModel
 from n16_eeg.simulate import generate_session
 
@@ -92,11 +93,11 @@ def score_synthetic(cases, model, options):
     results = []
     for onset, recovery, millis, risks in cases:
         alarm = trace(risks[model], options)
-        starts = alarm & ~np.r_[False, alarm[:-1]]
-        delay = millis[starts & (millis >= onset) & (millis < recovery)] - onset
+        before_recovery = millis < recovery
+        timing = alarm_onset_metrics(millis[before_recovery], alarm[before_recovery], onset)
         last = millis[alarm & (millis >= recovery)] - recovery
-        results.append(dict(delay_ms=int(delay[0]) if len(delay) else None,
-                            pre_onset_alarm=bool(alarm[millis < onset].any()),
+        results.append(dict(delay_ms=timing['onset_to_alarm_ms'],
+                            pre_onset_alarm=timing['pre_onset_alarm'],
                             last_alarm_after_recovery_ms=int(last[-1]) if len(last) else 0))
     return results
 

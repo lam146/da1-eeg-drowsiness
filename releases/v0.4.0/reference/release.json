@@ -1,0 +1,16 @@
+{
+  "release": "welch_blend",
+  "status": "EXPERIMENTAL_S01_S02",
+  "window_s": 3,
+  "step_s": 0.25,
+  "consecutive": 3,
+  "variants": {
+    "LowRepeat": {
+      "file": "combined_PROVISIONAL.json",
+      "sha256": "f25e1f4afa64ca012c53b0fa72b5b39b74c1dd4efeb89cd4fce901a076f6c0bb",
+      "threshold": 0.54,
+      "release_consecutive": 3,
+      "screen_raw": true
+    }
+  }
+}

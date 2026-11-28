@@ -5,3 +5,4 @@
 *.md text eol=lf
 *.toml text eol=lf
 *.ps1 text eol=crlf
+/releases/v0.4.0/**/*.json -text whitespace=trailing-space,cr-at-eol

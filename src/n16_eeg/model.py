@@ -47,6 +47,7 @@ class LogisticModel:
     threshold: float = 0.5
     model_type: str = "numpy_logistic_regression"
     format_version: int = 1
+    spectral_estimator: str = "periodogram"
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         array = np.asarray(X, dtype=float)
@@ -72,7 +73,10 @@ class LogisticModel:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = asdict(self)
+        if self.format_version == 1 and self.spectral_estimator == "periodogram":
+            del payload["spectral_estimator"]
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> "LogisticModel":
@@ -83,7 +87,10 @@ class LogisticModel:
     def from_payload(cls, payload: dict) -> "LogisticModel":
         if payload.get("model_type") != "numpy_logistic_regression":
             raise ValueError("Unsupported model type")
-        if payload.get("format_version") != 1:
+        version = payload.get("format_version")
+        spectrum = payload.get("spectral_estimator", "periodogram")
+        if not ((version == 1 and spectrum == "periodogram")
+                or (version == 2 and spectrum in ("welch_median", "welch_blend"))):
             raise ValueError("Unsupported model format version")
         return cls(**payload)
 

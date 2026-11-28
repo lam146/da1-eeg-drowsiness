@@ -110,3 +110,8 @@ def test_live_alarm_waits_for_fresh_eeg_after_stall(monkeypatch, tmp_path):
     assert decisions.loc[gap_index, 'alarm'] == 0
     assert decisions.loc[gap_index + 1, 'timestamp_ms'] == 2900
     assert decisions.loc[gap_index + 1, 'poor_signal_fraction'] == 0.125
+    assert decisions.loc[decisions.alarm.eq(1), 'episode_id'].drop_duplicates().tolist() == [1, 2]
+    assert decisions.loc[decisions.alarm.eq(0), 'episode_id'].isna().all()
+    assert decisions.loc[gap_index, 'raw_segment'] == 1
+    assert pd.isna(decisions.loc[gap_index, 'sample_index'])
+    assert decisions.sample_index.dropna().iloc[:3].tolist() == [511, 639, 1151]

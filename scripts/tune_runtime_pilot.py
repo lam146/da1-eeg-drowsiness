@@ -15,12 +15,12 @@ from improve_pilot_ml import KEY, scored
 from n16_eeg.model import LogisticModel, fit_logistic_model
 
 
-def fit(frame):
-    x = frame[FEATURES].to_numpy(float)
+def fit(frame, columns=FEATURES):
+    x = frame[columns].to_numpy(float)
     scaler = RobustScaler().fit(x)
     model = LogisticRegression(C=.1, max_iter=3000).fit(
         scaler.transform(x), frame.label, sample_weight=session_weights(frame))
-    compatible = LogisticModel(FEATURES, scaler.center_.tolist(), scaler.scale_.tolist(),
+    compatible = LogisticModel(columns, scaler.center_.tolist(), scaler.scale_.tolist(),
                                model.coef_[0].tolist(), float(model.intercept_[0]))
     np.testing.assert_allclose(compatible.predict_proba(x), model.predict_proba(scaler.transform(x))[:, 1], atol=1e-10)
     return compatible

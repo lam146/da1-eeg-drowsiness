@@ -9,11 +9,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from update_openvibe_model import FS, WINDOW, feature_vector, read_raw
+from update_openvibe_model import FS, WINDOW, feature_vector, read_raw, recording_labels, sha256
 from upgrade_openvibe_model import FEATURES, fit, predict
 
 from n16_eeg.alarm import AlarmPolicy
-from n16_eeg.csv_test import raw_artifacts
+from n16_eeg.alarm_eval import alarm_onset_metrics
+from n16_eeg.quality import RawArtifactGuard
 from n16_eeg.model import load_model
 from n16_eeg.simulate import generate_session
 
@@ -23,8 +24,9 @@ STEP = FS // 4
 def scores(raw, predict_values):
     stops = np.arange(WINDOW, len(raw) + 1, STEP)
     values = pd.DataFrame([feature_vector(raw[stop - WINDOW:stop]) for stop in stops], columns=FEATURES)
-    prefix = raw_artifacts(raw, np.zeros(len(raw), dtype=int), FS)
-    valid = prefix[stops - WINDOW] == prefix[stops]
+    guard = RawArtifactGuard(WINDOW, FS, True)
+    rejected = np.fromiter((guard.update(sample) for sample in raw), dtype=bool, count=len(raw))
+    valid = ~rejected[stops - 1]
     return stops, predict_values(values), valid
 
 
@@ -44,10 +46,13 @@ def collect(source, raw_dir, fixture):
     for session in sessions:
         relative = Path(session["file"])
         person = relative.parent.name
-        stops, values, valid = scores(read_raw(raw_dir / relative), partial(predict, models[person]))
-        label = session.get("session_label", 1)
-        count = len(stops) if "session_label" in session else np.count_nonzero(stops <= 900 * FS)
-        real.append((person, label, values[:count], valid[:count]))
+        path = raw_dir / relative
+        raw = read_raw(path)
+        stops, values, valid = scores(raw, partial(predict, models[person]))
+        labels, _ = recording_labels(raw_dir, session, path, sha256(path), len(raw), stops - WINDOW, stops)
+        for block in np.split(np.arange(len(stops)), np.flatnonzero(np.diff(labels)) + 1):
+            if len(block) and labels[block[0]] >= 0 and valid[block].any():
+                real.append((person, int(labels[block[0]]), values[block], valid[block]))
         print(relative.name, flush=True)
     profile = json.loads((source / "release.json").read_text())["variants"]["LowRepeat"]
     model = load_model(source / profile["file"])
@@ -79,9 +84,9 @@ def compare(real, synthetic, threshold, count, release_count, support=None):
     delays, early = [], 0
     for time, values, valid in synthetic:
         alarm = evaluate_trace(values, valid, threshold, count, release_count, support)
-        early += int(np.any(alarm & (time < 0)))
-        event = time[alarm & (time >= 0)]
-        delays.append(float(event[0]) if len(event) else None)
+        timing = alarm_onset_metrics(time, alarm, 0)
+        early += int(timing["pre_onset_alarm"])
+        delays.append(timing["onset_to_alarm_ms"])
     return {
         "threshold": threshold,
         "confirmation_windows": count,
@@ -108,20 +113,22 @@ def run(source, raw_dir, fixture, output, release_directory=None):
     candidates.extend(compare(real, synthetic, .57, count, 3, (floor, minimum))
                       for count, floor, minimum
                       in product((2, 3, 4), (.535, .545, .55, .555, .56, .565), range(5, 13)))
-    # Require 1.25 s of sustained evidence while keeping the simulated worst case below 3.35 s.
+    # Every case must have a fresh alarm strictly within the N16 deadline.
     eligible = [item for item in candidates if item["threshold"] == baseline["threshold"]
                 and item["support"] is not None and item["support"][1] >= 6
                 and item["early_synthetic_alarms"] == 0
                 and item["synthetic_alarms"] == item["synthetic_cases"]
-                and item["synthetic_worst_ms"] <= 3350 and item["drowsy_alarm_fraction"] >= .58]
+                and item["synthetic_under_3s"] == item["synthetic_cases"] and item["drowsy_alarm_fraction"] >= .58]
     selected = min(eligible, key=lambda item: (item["awake_short_episodes_per_minute"],
                                               -item["synthetic_under_3s"],
-                                              -item["drowsy_alarm_fraction"]))
+                                              -item["drowsy_alarm_fraction"]), default=None)
     report = {"scope": "Development comparison. Raw OpenViBE sessions use provisional labels "
                        "and a model fit with the replay subject held out. Timing is synthetic.",
               "baseline": baseline, "selected": selected, "candidates": candidates}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    if release_directory is not None and selected is None:
+        raise ValueError("No candidate met the release criteria. See the comparison report.")
     if release_directory is not None:
         release = json.loads((source / "release.json").read_text(encoding="utf-8-sig"))
         profile = release["variants"]["LowRepeat"]

@@ -12,6 +12,7 @@ from develop_pilot_model import FEATURES
 from improve_pilot_ml import KEY
 from n16_eeg.blink import blink_window_features
 from n16_eeg.live import LiveDetector
+from n16_eeg.alarm_eval import alarm_onset_metrics
 from n16_eeg.model import LogisticModel
 from n16_eeg.signal_features import bandpower_features
 from n16_eeg.simulate import generate_session
@@ -98,21 +99,20 @@ def onset_test(model, config, raw):
         raise ValueError('Synthetic timing cases need one onset marker')
     onset = int(marker.iloc[0])
     detector = LiveDetector(model, window_s=window, step_s=step, consecutive=count)
-    early, first_alarm, first_risk, poor_alarms = False, None, None, 0
+    first_risk, poor_alarms = None, 0
+    times, alarms = [], []
     for row in raw.itertuples(index=False):
         decision = detector.add_sample(row.raw_eeg, row.poor_signal)
         if decision is None:
             continue
+        times.append(row.timestamp_ms)
+        alarms.append(bool(decision['alarm']))
         if decision['state'] == 'TIN_HIEU_KEM':
             poor_alarms += int(decision['alarm'])
         if row.timestamp_ms >= onset and decision['state'] in ('NGUY_CO', 'CANH_BAO') and first_risk is None:
             first_risk = int(row.timestamp_ms - onset)
-        if decision['alarm'] and row.timestamp_ms < onset:
-            early = True
-        elif decision['alarm'] and first_alarm is None:
-            first_alarm = int(row.timestamp_ms - onset)
-    return dict(first_risk_ms=first_risk, onset_to_alarm_ms=first_alarm,
-                pre_onset_alarm=early, poor_signal_alarms=poor_alarms)
+    return dict(first_risk_ms=first_risk, poor_signal_alarms=poor_alarms,
+                **alarm_onset_metrics(times, alarms, onset))
 
 
 def run(pilot, fixture, prior, output):

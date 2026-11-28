@@ -4,6 +4,32 @@
 
 Mục tiêu là kết hợp **đặc trưng phổ EEG và đặc trưng chớp mắt từ raw**, xây dựng mô hình phân loại tỉnh/buồn ngủ và triển khai cảnh báo âm thanh. Nhãn dữ liệu tự thu dựa trên KSS theo quy trình thí nghiệm. Thiết bị sử dụng là NeuroSky với raw danh định 512 Hz.
 
+## N16 EEG Monitor v0.4.0
+
+[Tải ứng dụng Windows v0.4.0](https://github.com/lam146/da1-eeg-drowsiness/releases/tag/v0.4.0). Giải nén gói Windows và mở EXE. Máy chạy bản đóng gói không cần cài Python.
+
+- **Đo trực tiếp** bằng NeuroSky qua Bluetooth. HUD hiển thị EEG và chất lượng tiếp xúc. Khi người đo ghi KSS hoặc tự báo tỉnh/buồn ngủ, app xác nhận mốc đã gắn với mẫu EEG.
+- **Xem lại phiên** để đối chiếu trạng thái app tại lúc bấm và đoạn EEG của quyết định. Có thể xuất ZIP phiên để phân tích sau.
+- **So sánh 2 bản** bằng một ZIP phiên hoặc CSV raw. Hai mô hình Welch ngưỡng 0,54 và 0,545 được chạy trên cùng lưới mẫu. Với bản ghi có mốc KSS phù hợp, báo cáo cho biết số đợt báo khi tỉnh và tỷ lệ cửa sổ chưa báo khi buồn ngủ.
+
+Trên tập phát triển, balanced accuracy trung bình theo ba người có đủ hai lớp đạt 54,81% ở cấu hình thử nghiệm và 54,00% ở đối chứng. Trên 256 ca mô phỏng mới, cả hai cấu hình có 252 ca cảnh báo dưới 3 giây và ca chậm nhất 3,498 giây trên trục mẫu. Độ trễ Bluetooth tới loa khi đeo cần được đo riêng.
+
+Mở ứng dụng từ mã nguồn trên Windows bằng PowerShell tại thư mục repo.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[hardware,ml-extra,dev]"
+.\.venv\Scripts\python scripts/n16_live_app.py --check
+.\.venv\Scripts\python scripts/n16_live_app.py
+```
+
+Để đóng gói lại, cài PyInstaller trong cùng môi trường rồi chạy script.
+
+```powershell
+.\.venv\Scripts\python -m pip install "pyinstaller>=6,<7"
+.\scripts\build_live_exe.ps1
+```
+
 ## Bản Windows và mô hình cập nhật ngày 17/11/2026
 
 Tải ứng dụng trong `releases/N16_KSS_20261117/N16_NhanBietBuonNgu_KSS_20261117.exe`. Mở ứng dụng, chọn cổng COM và nhấn **Bắt đầu**, hoặc dùng **Chọn CSV để kiểm tra** để phát lại raw OpenViBE.

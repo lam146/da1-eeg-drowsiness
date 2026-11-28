@@ -1,0 +1,16 @@
+{
+  "release": "N16_Welch_Anchored_4",
+  "status": "DEVELOPMENT_ONLY",
+  "window_s": 3,
+  "step_s": 0.25,
+  "consecutive": 3,
+  "variants": {
+    "LowRepeat": {
+      "file": "combined.json",
+      "sha256": "31784d48e8f4534294bec168dd98e8d905c20f30ad8260f04ed0529efec70817",
+      "threshold": 0.545,
+      "release_consecutive": 3,
+      "screen_raw": true
+    }
+  }
+}

@@ -40,11 +40,30 @@ def _periodogram(x: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
     return frequencies, psd
 
 
-def bandpower_features(samples: np.ndarray, fs: float = 512.0) -> dict[str, float]:
+def _welch_3s(filtered, fs, estimator):
+    if fs != 512 or len(filtered) != 1536:
+        raise ValueError("The N16 Welch model requires a 3-second window at 512 Hz")
+    frames = np.lib.stride_tricks.sliding_window_view(filtered, 512)[::256]
+    taper = np.hanning(513)[:-1]  # periodic Hann
+    transformed = np.fft.rfft((frames - frames.mean(axis=1, keepdims=True)) * taper, n=1536)
+    spectra = np.abs(transformed) ** 2 / (fs * np.sum(taper**2))
+    spectra[:, 1:-1] *= 2.
+    # Five half-overlapping periodograms. SciPy's median bias factor for five is 47/60.
+    median = np.median(spectra, axis=0) / (47 / 60)
+    psd = median if estimator == "welch_median" else (spectra.mean(axis=0) + median) / 2
+    return np.fft.rfftfreq(1536, 1 / fs), psd
+
+
+def bandpower_features(samples: np.ndarray, fs: float = 512.0, estimator: str = "periodogram") -> dict[str, float]:
     """Compute absolute/relative band powers and robust drowsiness ratios."""
 
     filtered = preprocess_window(np.asarray(samples), fs=fs)
-    freqs, psd = _periodogram(filtered, fs)
+    if estimator == "periodogram":
+        freqs, psd = _periodogram(filtered, fs)
+    elif estimator in ("welch_median", "welch_blend"):
+        freqs, psd = _welch_3s(filtered, fs, estimator)
+    else:
+        raise ValueError(f"Unsupported spectral estimator: {estimator}")
     total_mask = (freqs >= 0.5) & (freqs <= 45.0)
     total = float(np.trapezoid(psd[total_mask], freqs[total_mask]))
     total = max(total, np.finfo(float).eps)

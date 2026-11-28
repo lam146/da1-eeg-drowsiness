@@ -15,6 +15,7 @@ from .alarm import AlarmPolicy
 from .blink import blink_window_features
 from .model import LogisticModel, load_model, risk_score
 from .rbf_model import RbfModel
+from .quality import RawArtifactGuard
 from .signal_features import bandpower_features
 
 
@@ -42,6 +43,9 @@ def replay(
     model: LogisticModel | RbfModel | None = None,
     verbose: bool = True,
     release_consecutive: int = 1,
+    support_threshold: float | None = None,
+    support_consecutive: int = 1,
+    screen_raw: bool = False,
 ) -> pd.DataFrame:
     required = {"timestamp_ms", "raw_eeg", "poor_signal"}
     missing = required - set(frame.columns)
@@ -55,21 +59,24 @@ def replay(
     if window < 8 or step < 1 or consecutive < 1:
         raise ValueError("Invalid replay window, step, or confirmation count")
     baseline_ratios: deque[float] = deque(maxlen=10)
-    policy = AlarmPolicy(threshold, consecutive, release_consecutive)
+    policy = AlarmPolicy(threshold, consecutive, release_consecutive,
+                         support_threshold=support_threshold, support_consecutive=support_consecutive)
     rows: list[dict[str, object]] = []
     output_log.parent.mkdir(parents=True, exist_ok=True)
+    guard = RawArtifactGuard(window, fs, screen_raw)
+    rejected = [guard.update(float(value)) for value in frame.raw_eeg]
 
     for start in range(0, len(frame) - window + 1, step):
         started_ns = time.perf_counter_ns()
         block = frame.iloc[start : start + window]
         poor = pd.to_numeric(block["poor_signal"], errors="coerce").fillna(255).to_numpy(float)
-        if float(np.mean(poor > 50)) > 0.20:
+        if rejected[start + window - 1] or poor[-1] > 50 or float(np.mean(poor > 50)) > 0.20:
             policy.reset()
             if speed > 0:
                 time.sleep(step_s / speed)
             continue
         samples = pd.to_numeric(block["raw_eeg"], errors="coerce").to_numpy(float)
-        spectral = bandpower_features(samples, fs=float(fs))
+        spectral = bandpower_features(samples, fs=float(fs), estimator=getattr(model, "spectral_estimator", "periodogram"))
         blink = blink_window_features(samples, fs=float(fs))
         if len(baseline_ratios) < baseline_ratios.maxlen:
             baseline_ratios.append(spectral["theta_alpha"])
@@ -123,6 +130,9 @@ def main() -> None:
     parser.add_argument("--step-s", type=float, default=1.0, help="Seconds between predictions")
     parser.add_argument("--consecutive", type=int, default=2, help="Risk predictions required to alert")
     parser.add_argument("--release-consecutive", type=int, default=1, help="Low-risk predictions required to clear the alert")
+    parser.add_argument("--support-threshold", type=float)
+    parser.add_argument("--support-consecutive", type=int, default=1)
+    parser.add_argument("--screen-raw", action="store_true")
     parser.add_argument(
         "--threshold", type=float, help="Override saved model threshold (heuristic default: 0.85)"
     )
@@ -142,6 +152,9 @@ def main() -> None:
         step_s=args.step_s,
         consecutive=args.consecutive,
         release_consecutive=args.release_consecutive,
+        support_threshold=args.support_threshold,
+        support_consecutive=args.support_consecutive,
+        screen_raw=args.screen_raw,
         speed=args.speed,
         threshold=threshold,
         sound=args.sound,

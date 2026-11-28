@@ -23,7 +23,7 @@ def raw_artifacts(values, segments, fs):
 
 
 def test_recording(source: Path, output: Path, detector: LiveDetector, stop: Event, *,
-                   screen_raw: bool = False) -> dict | None:
+                   screen_raw: bool | None = None) -> dict | None:
     with source.open(encoding="utf-8-sig", newline="") as handle:
         sample = handle.readline()
         if not sample:
@@ -81,7 +81,7 @@ def test_recording(source: Path, output: Path, detector: LiveDetector, stop: Eve
     if np.any(np.diff(segments) < 0):
         raise ValueError("Mã đoạn raw_segment phải tăng dần theo thời gian.")
 
-    artifact_totals = raw_artifacts(values, segments, detector.fs) if screen_raw else None
+    detector.raw_guard.screen_raw = detector.screen_raw if screen_raw is None else screen_raw
     detector.reset()
     previous_segment = segments[0]
     was_alarming = False
@@ -95,10 +95,7 @@ def test_recording(source: Path, output: Path, detector: LiveDetector, stop: Eve
             detector.reset()
             was_alarming = False
             previous_segment = segment
-        window_start = index + 1 - detector.window_samples
-        artifact = bool(artifact_totals is not None and window_start >= 0 and
-                        artifact_totals[index + 1] > artifact_totals[window_start])
-        decision = detector.add_sample(value, quality, raw_artifact=artifact)
+        decision = detector.add_sample(value, quality)
         if decision is None:
             continue
         alarming = bool(decision["alarm"])
@@ -107,7 +104,7 @@ def test_recording(source: Path, output: Path, detector: LiveDetector, stop: Eve
         if decision["risk"] != "":
             scores.append(decision["risk"])
         decision.pop("timestamp_ms")
-        decision["raw_artifact"] = int(artifact)
+        decision.setdefault("raw_artifact", 0)
         if not use_quality:
             decision["poor_signal_fraction"] = ""
         rows.append({"window_end_s": round(float(nominal[index]) / 1000, 6),
